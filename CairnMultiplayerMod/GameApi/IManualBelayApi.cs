@@ -8,15 +8,37 @@ internal interface IManualBelayApi
     bool Enabled { get; }
     bool NeedsTick => false;
     string ControlNotice => null;
+    bool SharedDamageEnabled => false;
+    PartnerFallObservation? PollPartnerFall(Guid session) => null;
+    PartnerDamageResult ApplyPartnerDamage(PartnerDamageRequest request)
+        => new(false, false, 0, 0, float.NaN, float.NaN, "Shared damage is unavailable.");
     float RopeCapacity => 0;
     bool TryCaptureRopeVisual(Guid session, out WorldPosition[] points) { points = null; return false; }
     void ShowRopeVisual(Guid session, int climber, uint revision, WorldPosition[] points) { }
     void ClearRopeVisual() { }
+    bool CanPrepareRoleStation(Guid session, out string reason) { reason = "Role exchange unavailable."; return false; }
+    bool PrepareRoleStation(Guid session, out BelaySharedStation station, out string reason)
+    { station = default; reason = "Role exchange unavailable."; return false; }
+    bool RoleStationValid(Guid session, BelaySharedStation station) => false;
+    bool CanReceiveRoleSwap(Guid session, BelaySharedStation station, out string reason)
+    { reason = "Role exchange unavailable."; return false; }
+    BelayRolePreparation PrepareRoleClimber(Guid session, Guid next, BelaySharedStation station, out string reason)
+    { reason = "Role exchange unavailable."; return BelayRolePreparation.Failed; }
+    bool CommitRoleSwap(Guid session, Guid next, BelaySharedStation station, bool becomeBelayer, out string reason)
+    { reason = "Role exchange unavailable."; return false; }
+    void CancelRoleSwap() { }
     bool CanBeginStation(out string reason) { reason = "Station unavailable."; return false; }
     bool CanClimb(out string reason) { reason = "Protection unavailable."; return false; }
     bool TryGetStation(out BelaySharedStation station) { station = default; return false; }
     bool IsStationKnown(BelaySharedStation station) => false;
     bool CanClimb(BelaySharedStation station, out string reason) { reason = "Shared station unavailable."; return false; }
+    bool RecoveryCharacterAlive => false;
+    void RetainRecoveryPatches(Guid session) { }
+    void ReleaseRecoveryPatches() { }
+    bool TryResumeStation(BelaySharedStation station, out string reason) { reason = "Station recovery unavailable."; return false; }
+    bool CanResumeClimber(BelaySharedStation station, out string reason) { reason = "Climber recovery unavailable."; return false; }
+    bool BeginResumedClimber(Guid newSession, BelaySharedStation station, out string reason)
+    { reason = "Climber recovery unavailable."; return false; }
     bool BeginStation(out string reason);
     bool HasStation => false;
     bool StationValid { get; }
@@ -31,7 +53,10 @@ internal interface IManualBelayApi
     void ResetScene();
     void Shutdown();
     string InteractionNotice => null;
+
 }
+
+internal enum BelayRolePreparation { Preparing, Ready, Failed }
 
 internal readonly record struct BelaySharedStation(Guid Id, WorldPosition Position, int PitonOwner = -1, uint PitonId = 0)
 {

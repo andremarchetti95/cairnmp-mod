@@ -31,7 +31,7 @@ base URL for local testing with `CAIRNMP_API_URL`.
 
 > [!IMPORTANT]
 > Every player in a lobby must use a compatible CairnMP build. The current wire
-> protocol is **18**; lobby admission may also require the exact mod version.
+> protocol is **19**; lobby admission may also require the exact mod version.
 
 ## Features
 
@@ -42,34 +42,34 @@ base URL for local testing with `CAIRNMP_API_URL`.
 | World | Weather, time of day, pitons, shared ground items, and world pings |
 | Communication | In-game chat, completion, host commands, and experimental proximity voice |
 | Sessions | Steam relay hosting, late-join state, and host-authoritative validation |
-| Modes | Rope team, Belay Team, free solo and race, with synchronized bivouac behavior |
+| Modes | Rope team, free solo and race, with synchronized bivouac behavior |
 | Destinations | Mount Kami from your own save, or a Summit-mode world from the free *On the Trail: Deep Water* DLC |
 | Reliability | Local crash reports, bounded diagnostics, and isolated feature failures |
 
 ## Player guide
 
-### Belay Team (experimental core)
+### Belay Team (experimental)
 
-Choose **Belay Team** when creating a lobby. All players need the same protocol-18
-build. This core adds anchored partner belay alongside the original Rope team.
+Choose **Belay Team** when creating a lobby. Both players need the same
+experimental build; public protocol-16 builds and earlier pilots are incompatible.
+The belayer personally anchors at a healthy piton and defines the station with
+**L > K**. Use **O** to offer belay or **I** to request it; **Enter** accepts and
+**Backspace** declines. The panel shows any unmet native-route requirement.
 
-The belayer anchors at a healthy piton with **E** and defines that station with
-**L > K**. Select a partner with Up/Down, then **O** offers belay or **I** requests
-it. **Enter** accepts; **Backspace** declines or cancels an invitation. If the exact
-station is not on the climber's native route, keep the climber anchored at a separate
-healthy backup until attachment and rope readback confirm. No extra piton is spawned.
+With L closed, the belayer uses **Up/Down** to feed/take in slack and **Space/F7**
+to latch/release the brake. Take-in removes slack without hauling. The HUD shows
+both roles. The belayer leaves their locked anchor through **L > End belay**.
 
-With L closed, the belayer holds **Up** to feed rope in FREE or **Down** to take in
-slack without hauling. Release the key to stop. **Space/F7** toggles the brake.
-BRAKED limits outward climbing at the released length and catches falls through
-native protection physics. The belayer remains anchored; the climber can add pitons
-while unloaded. The HUD identifies both roles; the belayer also sees the rope shape.
+Either role can request an exchange through **L > K**. The current climber must
+propose their actual healthy personal anchor; the belayer confirms that station.
+Both remain anchored until the new route confirms and the roles change.
+Unexpected interruptions may wait up to 120 seconds for fresh checks of the same
+pair, station and existing route. A resumed session starts braked with zero
+motion; release control keys before using them again. End belay cancels consent.
 
-Use **End belay** to release the pair. Pause, focus loss, cutscenes, lost authority,
-invalid native routes or disconnects end control; returning requires a **new
-invitation**. Ending control preserves native protection/hold cleanup. Role exchange,
-automatic reconnection, dialogue queuing and shared damage are separate extensions.
-Native damage and piton outcomes remain the game's own behavior.
+Shared fall damage is opt-in through `Debug.BelaySharedDamageExperiment`.
+A completed catch can add height-attenuated fall damage and share 30% of the
+climber's observed loss fraction with the belayer. Wider native testing is pending.
 
 ### Controller
 

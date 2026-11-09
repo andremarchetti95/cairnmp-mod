@@ -24,6 +24,8 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
     private readonly Func<int> _localPlayerId;
     private readonly Func<BelaySharedStation, bool> _stationKnown;
     private readonly HarmonyLib.Harmony _harmony = new("CairnMultiplayerMod.ManualBelay");
+    private readonly BelayPatchRetention _patchRetention = new();
+    private uint _patchScene;
     private bool _installed, _stopping, _holdApplied;
     private Lifeline _lifeline, _stationLifeline;
     private LogicalRope _rope;
@@ -53,9 +55,9 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
     }
 
     public bool Enabled => _remoteEnabled();
-    public bool NeedsTick => _control != null || _attachment != null || HasStation
+    public bool NeedsTick => _control != null || _attachment != null || HasStation || _roleAnchor != null || _rolePreparing
         || _stationClimbInput.HasOwnership || _installed || _unpatchPending
-        || !ReferenceEquals(_visualLine, null);
+        || _sharedDamageInstalled || _sharedDamageUnpatchPending || !ReferenceEquals(_visualLine, null);
     public ManualBelayStatus Status => _attachment != null ? AttachmentStatus : new(_control != null && !_stopping, _control?.Attached == true,
         _control?.Braked == true, _lease?.Sequence ?? 0, _appliedSequence, _actual, _real,
         _topology?.Current?.ProtectionCount ?? 0, _topology?.Revision ?? 0, _rebinding,
@@ -87,11 +89,11 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
 
     private static bool TryGetActiveContext(out string reason)
     {
-        reason = "The game window is not focused. Return to the game before starting belay.";
+        reason = "The game window is not focused. Return to the game before starting or resuming belay.";
         if (!Application.isFocused) return false;
         reason = "The pause menu is open. Re-anchor and send a new invitation after resuming.";
         if (MultiplayerPausePatch.IsPauseMenuActive) return false;
-        reason = "The game is paused. Unpause before starting belay.";
+        reason = "The game is paused. Unpause before starting or resuming belay.";
         if (!(Time.timeScale > 0)) return false;
         reason = "The native game left active gameplay (cutscene, loading or menu). Revalidate protection before a new invitation.";
         if (!GameLifecycleService.TryGetRawGameState(out var lifecycle) || lifecycle != CairnGameLifecycleState.InGame) return false;
@@ -176,7 +178,11 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
     }
 
     public bool CanClimb(out string reason)
+        => TryClimberStartSnapshot(out _, out _, out reason);
+
+    private bool TryClimberStartSnapshot(out Lifeline lifeline, out BelayTopologySnapshot snapshot, out string reason)
     {
+        lifeline = null; snapshot = null;
         reason = "Enable the belay experiment first.";
         if (!Enabled) return false;
         if (!TryGetActiveContext(out reason)) return false;
@@ -186,7 +192,8 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
         if (HasStation) return false;
         reason = "Disconnect the existing cooperative rope first.";
         if (RopeInterop.IsNativeBelayEngaged) return false;
-        return TryStartSnapshot(LocalLifeline(), out _, out reason);
+        lifeline = LocalLifeline();
+        return TryStartSnapshot(lifeline, out snapshot, out reason);
     }
 
     public bool StationValid
@@ -221,6 +228,7 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
 
     public void EndStation()
     {
+        RememberRecoveryStation(_definedStation, _stationAnchor, _stationSession);
         if (HasStation) ModLog.Info("[BelayStation] Removed; personal native anchoring unchanged; reason="
             + (_stationInvalidReason ?? "Session or station ended explicitly.") + ", session=" + _stationSession);
         if (_stationSession != Guid.Empty && _installed && _control == null) RequestPatchRemoval();
@@ -238,12 +246,18 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
         _unpatchPending = false;
         _stationSession = session; _stationOwner = this;
         if (!RefreshStationClimbInput()) return false;
+        _patchRetention.BeginSession(session, _patchScene, Now);
         ModLog.Info("[BelayStation] Personal anchor input locked; use L > End belay to leave; session=" + session);
         return true;
     }
 
     private static bool BeforePersonalAnchorInput(ClimbingV2PawnController __instance, ref bool __result)
     {
+        var preparing = _owner;
+        if (preparing?._roleAnchor != null && preparing._roleLifeline?.pawn != null
+            && Id(__instance) == Id(preparing._roleLifeline.pawn)
+            && preparing.RoleStationValid(preparing._roleOldSession, preparing._roleStation))
+        { __result = false; return false; }
         var owner = _stationOwner;
         if (owner == null || owner._stationSession == Guid.Empty || !owner.HasStation
             || owner._stationLifeline?.pawn == null || Id(__instance) != Id(owner._stationLifeline.pawn)) return true;
@@ -257,7 +271,7 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
         return false;
     }
 
-    private bool BeginClimberControl(Guid session, out string reason)
+    private bool BeginClimberControl(Guid session, out string reason, bool initiallyBraked = false)
     {
         reason = "Partner belay is not enabled in this mode.";
         if (!Enabled) return false;
@@ -273,12 +287,14 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
         var lifeline = LocalLifeline();
         if (!TryStartSnapshot(lifeline, out var snapshot, out reason)) return false;
         if (!TryPrepareRope(lifeline, snapshot, out var ropeControl, out reason)) return false;
+        if (initiallyBraked) ropeControl?.SetBrake(true);
         Install();
         _lifeline = lifeline; _rope = lifeline.securingRope;
         _topology = new BelayTopologyTracker();
         _topology.Observe(snapshot, false, Now);
         BindTopology(snapshot);
-        _lease = new BelayInputLease(session, Now);
+        if (initiallyBraked) _control.ToggleBrake();
+        _lease = new BelayInputLease(session, Now, initiallyBraked);
         _started = Now;
         _stopping = _holdApplied = false;
         _hasLoggedApplication = false;
@@ -297,6 +313,7 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
             ModLog.Info("[BelayRope] Started; capacity=" + _ropeControl.Capacity + ", released=" + _ropeControl.Released);
         }
         _nextTopologyPoll = _lastValidTopology = Now;
+        _patchRetention.BeginSession(session, _patchScene, Now);
         _unpatchPending = false;
         _owner = this;
         ModLog.Info("[ManualBelay] Acquired protection; session=" + session + ", end=" + snapshot.Available
@@ -454,10 +471,11 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
     public void Tick()
     {
         TickRopeVisual();
+        TickSharedDamage();
         TickStationAttachment();
         if (HasStation && !StationValid) EndStation();
         RefreshStationClimbInput();
-        if (_unpatchPending && _control == null && _stationSession == Guid.Empty)
+        if (_unpatchPending && _control == null && _stationSession == Guid.Empty && !KeepRecoveryPatches())
         {
             Uninstall();
         }
@@ -630,6 +648,7 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
     private void RequestPatchRemoval()
     {
         _unpatchPending = true;
+        _patchRetention.RequestRelease(Now);
     }
 
     private static void AfterPitonDecision(Piton __instance, bool __result)
@@ -707,6 +726,8 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
 
     private void ClearControl(string reason = null)
     {
+        if (_partnerStation.HasValue) RememberRecoveryStation(_partnerStation.Value, _localStation, _lease?.Session ?? Guid.Empty);
+        ResetPartnerFallCapture();
         CancelStationAttachment(reason ?? "Native control was cleared.");
         ReleaseLocalRopeGoal();
         if (ReferenceEquals(_owner, this)) _owner = null;
@@ -728,16 +749,22 @@ internal sealed partial class ManualBelayAdapter : IManualBelayApi
     private bool _unpatchPending;
     public void ResetScene()
     {
+        ReleaseRecoveryPatches();
+        _patchScene++;
+        ResetPartnerFallCapture();
         ResetPartnerRoute();
         ClearRopeVisual();
+        CancelRoleSwap();
         if (_localStation != null) ModLog.Info("[BelayStation] Partner station cleared by a scene reset.");
         EndStation(); ReleaseStationClimbInput(force: true);
         ClearControl("A scene reset invalidated the native rope and station."); ClearLocalStation();
+        ForgetRecoveryStation();
     }
     public void Shutdown()
     {
         ResetScene();
         ReleaseStationClimbInput(force: true);
+        ShutdownSharedDamage();
         if (_installed) Uninstall();
         _installed = _unpatchPending = false;
     }

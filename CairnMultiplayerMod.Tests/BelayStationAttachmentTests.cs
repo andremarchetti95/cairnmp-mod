@@ -167,7 +167,7 @@ public sealed class BelayStationAttachmentTests
     [Theory]
     [InlineData(1)]
     [InlineData(3)]
-    public void InitialAttachmentAcceptsAStationAfterAllOriginalProtections(int protections)
+    public void AnchoredRolePreparationAcceptsAnUpperStationAfterAllOriginalProtections(int protections)
     {
         var (before, after, original, connected) = TerminalInsertion(protections);
         var trial = new BelayStationAttachment(before, original, 10, 100, 0);

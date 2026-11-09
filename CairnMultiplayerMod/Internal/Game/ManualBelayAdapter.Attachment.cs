@@ -88,9 +88,10 @@ internal sealed partial class ManualBelayAdapter
         }
         reason = "Wait for all original protection pins to load before connecting the station.";
         if (colliders.Contains(0) || !AttachmentPinsReady(state, false)) return false;
+        RememberRecoveryStation(reference, state.Anchor, session);
         // The accepted pair retains its personal backup and every original pin.
-        // Native insertion may put S before or after those protections;
-        // confirm the actual native path.
+        // Native insertion may put S before or after those protections, in both
+        // initial connections and role exchanges; confirm the actual native path.
         state.Observer = new BelayStationAttachment(before, ReadProtectionOrder(lifeline), Id(station), state.Quickdraw.Pointer.ToInt64(), Now, robotHolder);
         _lease = new BelayInputLease(session, Now);
         _controlNotice = null;
@@ -118,7 +119,8 @@ internal sealed partial class ManualBelayAdapter
         try
         {
             if (!Enabled || _lease.IsExpired(Now) || RopeInterop.IsNativeBelayEngaged
-                || _stationLifeline != null
+                || (_stationLifeline != null && !_rolePreparing)
+                || (_rolePreparing && (_stationSession != _roleOldSession || !StationValid))
                 || !TryGetActiveContext(out _))
             { CancelStationAttachment("The station context or fresh partner-input lease ended."); return; }
             var lifeline = state.Lifeline;
@@ -157,6 +159,7 @@ internal sealed partial class ManualBelayAdapter
             if (state.Observer.Stage == BelayStationAttachmentStage.Failed)
             { CancelStationAttachment("The station route did not confirm: " + state.Observer.Failure); return; }
             if (state.Observer.Stage != BelayStationAttachmentStage.Ready) return;
+            if (_rolePreparing) { _roleConnectionReady = true; return; }
             CompleteStationAttachment(state, _lease);
         }
         catch (Exception ex)
@@ -234,6 +237,7 @@ internal sealed partial class ManualBelayAdapter
     private void CancelStationAttachment(string reason)
     {
         if (_attachment == null) return;
+        if (_rolePreparing) _roleFailure = reason;
         ModLog.Info("[BelayAttachment] Stopped; no additional native requests or automatic rollback: " + reason);
         _attachment = null;
         _lease?.CancelMotion(); _lease = null;

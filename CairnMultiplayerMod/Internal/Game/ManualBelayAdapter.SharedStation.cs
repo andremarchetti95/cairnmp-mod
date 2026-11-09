@@ -47,6 +47,15 @@ internal sealed partial class ManualBelayAdapter
     private static bool CanUseAttachedStation(Lifeline lifeline, Piton station, out string reason)
     {
         if (!TryStartSnapshot(lifeline, out var snapshot, out reason)) return false;
+        return CanUseAttachedStation(lifeline, station, snapshot, out reason);
+    }
+
+    // The snapshot is local to this synchronous preflight, never cached between
+    // readiness checks or carried into the later native acquisition.
+    private static bool CanUseAttachedStation(Lifeline lifeline, Piton station, BelayTopologySnapshot snapshot, out string reason)
+    {
+        reason = "The native protection rope changed during station readiness.";
+        if (snapshot == null || lifeline?.securingRope == null || snapshot.Rope != Id(lifeline.securingRope)) return false;
         reason = "The climber's rope cannot cover the station's ordered protection route.";
         var rope = lifeline.securingRope;
         var points = new System.Collections.Generic.List<BelayProtectionPoint>();
@@ -71,18 +80,21 @@ internal sealed partial class ManualBelayAdapter
         return attached ? BindPartnerStation(session, station, piton, out reason) : BeginStationAttachment(session, station, piton, out reason);
     }
 
-    private bool BindPartnerStation(Guid session, BelaySharedStation station, Piton piton, out string reason)
+    private bool BindPartnerStation(Guid session, BelaySharedStation station, Piton piton, out string reason,
+        bool initiallyBraked = false)
     {
         var lifeline = LocalLifeline();
         var anchor = new BelayStationAnchor(Id(lifeline), Id(lifeline.securingRope), Id(piton), ToNumerics(piton.transform.position));
+        if (!initiallyBraked) RememberRecoveryStation(station, anchor, session);
         _partnerStation = station;
         _localStation = anchor;
         _localStationPiton = piton;
         _localStationId = unchecked((uint)piton.GetInstanceID());
         try
         {
-            if (BeginClimberControl(session, out reason))
+            if (BeginClimberControl(session, out reason, initiallyBraked))
             {
+                if (initiallyBraked) RememberRecoveryStation(station, anchor, session);
                 ModLog.Info("[BelayStation] Partner station bound to the climber's existing native protection route; station=" + station.Id);
                 return true;
             }
@@ -98,7 +110,18 @@ internal sealed partial class ManualBelayAdapter
         reason = "The partner station reference is invalid.";
         if (!Enabled || !station.IsValid) return false;
         var lifeline = LocalLifeline();
-        if (!TrySnapshot(lifeline, out _, out reason)) return false;
+        if (!TrySnapshot(lifeline, out var snapshot, out reason)) return false;
+        return TryResolveSharedStation(station, lifeline, snapshot, out selected, out attached, out reason);
+    }
+
+    private bool TryResolveSharedStation(BelaySharedStation station, Lifeline lifeline, BelayTopologySnapshot snapshot,
+        out Piton selected, out bool attached, out string reason)
+    {
+        selected = null; attached = false;
+        reason = "The partner station reference is invalid.";
+        if (!Enabled || !station.IsValid) return false;
+        reason = "The native protection rope changed during station readiness.";
+        if (snapshot == null || lifeline?.securingRope == null || snapshot.Rope != Id(lifeline.securingRope)) return false;
         reason = "The station's exact session piton is not synchronized. Wait for its native copy; position-only reload matches cannot start belay.";
         if (!RopeInterop.TryResolvePitonReference(lifeline, station.PitonOwner, station.PitonId, _localPlayerId(), out selected)) return false;
         reason = "The agreed station piton moved, broke or has no quickdraw.";

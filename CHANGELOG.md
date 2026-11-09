@@ -14,16 +14,15 @@ All notable CairnMP changes are documented here. Releases follow
 ### Added
 
 - Experimental Belay Team: an anchored partner feeds, takes in and brakes the
-  climber's native protection rope, with explicit consent, synchronized stations,
-  native backup confirmation, protection updates and a remote rope drawing.
+  climber's native protection rope, with confirmed station-bound role exchange.
+- Bounded recovery after unexpected interruptions, a local dialogue invitation
+  queue and opt-in shared fall damage. Native acceptance remains incomplete.
 
 ### Changed
 
-- Preserve each piton's placer-local source ID separately from the host-assigned
-  ID. Owner/source references reject ambiguous or position-only reload matches.
-- Protocol 18 adds the anchored Belay Team core to protocol 17's exact piton
-  references. Every lobby member must update together. Role exchange, automatic
-  resume, dialogue queuing and shared fall damage are separate extensions.
+- Protocol 19 includes owner/source piton identity and Belay Team contracts.
+  Every lobby member must use the same experimental build. This branch includes
+  upstream 2.4.4; prior prototype protocol numbers are not release history.
 
 ## Releases
 
